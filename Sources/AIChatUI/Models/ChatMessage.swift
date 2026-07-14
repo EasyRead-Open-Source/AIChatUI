@@ -10,7 +10,7 @@ import Foundation
 import UIKit
 #endif
 
-/// A message model, corresponding to the original ChatMessage.
+/// A message model for AI chat conversations.
 public struct ChatMessage: Identifiable, Sendable {
     public enum Role: String, Codable, Sendable {
         case user
@@ -21,9 +21,7 @@ public struct ChatMessage: Identifiable, Sendable {
     public let role: Role
     public var text: String?
     public var imageData: Data?
-    public var title: String?
     public var body: String?
-    public var progress: Double?
     public var isProgressing: Bool
     public var isError: Bool
 
@@ -32,9 +30,7 @@ public struct ChatMessage: Identifiable, Sendable {
         role: Role,
         text: String? = nil,
         imageData: Data? = nil,
-        title: String? = nil,
         body: String? = nil,
-        progress: Double? = nil,
         isProgressing: Bool = false,
         isError: Bool = false
     ) {
@@ -42,9 +38,7 @@ public struct ChatMessage: Identifiable, Sendable {
         self.role = role
         self.text = text
         self.imageData = imageData
-        self.title = title
         self.body = body
-        self.progress = progress
         self.isProgressing = isProgressing
         self.isError = isError
     }
@@ -54,26 +48,20 @@ public struct ChatMessage: Identifiable, Sendable {
             id: UUID(),
             role: .user,
             text: text,
-            imageData: imageData,
-            isProgressing: false,
-            isError: false
+            imageData: imageData
         )
     }
 
     public static func assistant(
         id: UUID,
-        title: String,
         body: String,
-        progress: Double,
         isProgressing: Bool,
         isError: Bool
     ) -> ChatMessage {
         ChatMessage(
             id: id,
             role: .assistant,
-            title: title,
             body: body,
-            progress: progress,
             isProgressing: isProgressing,
             isError: isError
         )

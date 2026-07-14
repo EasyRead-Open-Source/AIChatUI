@@ -13,24 +13,21 @@ import UIKit
 /// A reusable chat interface for AI-powered conversations.
 ///
 /// Interacts with the host app through `AIChatConfiguration` closures,
-/// decoupling conversation persistence, generation APIs, photo picking,
-/// and external share handling.
+/// decoupling conversation persistence and generation APIs.
 ///
 /// Example usage:
 /// ```swift
 /// AIChatView(configuration: AIChatConfiguration(
-///     validateSession: { UserHelper.shared.token.isEmpty == false },
-///     loadConversations: { /* [ConversationSummary] */ },
-///     saveConversation: { detail in try modelContext.save() },
-///     submitMessage: { input, onUpdate in
-///         try await generateService.process(input: input, onUpdate: onUpdate)
+///     aiName: "Assistant",
+///     submitMessage: { input, onText in
+///         try await generateService.process(input: input, onText: onText)
 ///     }
 /// ))
 /// ```
 public struct AIChatView: View {
     private let configuration: AIChatConfiguration
 
-    @StateObject private var statusManager = AIChatStatusManager()
+    @State private var isGenerating = false
     @State private var inputText = ""
     @State private var selectedImageData: Data?
     @State private var messages: [ChatMessage] = []
@@ -42,14 +39,10 @@ public struct AIChatView: View {
     @State private var renameTargetID: UUID?
     @State private var activeResponseMessageID: UUID?
     @State private var generationTask: Task<Void, Never>?
-    @State private var importedShare: IncomingShare?
-    @State private var shareAwaitingReplacement: IncomingShare?
-    @State private var importErrorMessage: String?
     @State private var persistenceErrorMessage: String?
     @State private var conversations: [ConversationSummary] = []
     @State private var isCameraPresented = false
     @State private var isPhotoPickerPresented = false
-    @State private var isShareCheckScheduled = false
     @FocusState private var isInputFocused: Bool
 
     private var suggestions: [ChatSuggestion] { configuration.suggestions }
@@ -92,18 +85,12 @@ public struct AIChatView: View {
         .accessibilityIdentifier("aiChat.root")
         .onAppear {
             refreshConversations()
-            checkPendingShare()
             if !ProcessInfo.processInfo.arguments.contains("-ui-testing") {
                 focusInput(afterDelay: false)
             }
         }
         .onChange(of: configuration.validateSession()) { _, _ in
             cancelGenerationIfSessionChanged()
-        }
-        .onChange(of: statusManager.isProcessing) { _, isProcessing in
-            if !isProcessing {
-                checkPendingShare()
-            }
         }
         .onDisappear {
             cancelGenerationIfSessionChanged()
@@ -127,34 +114,6 @@ public struct AIChatView: View {
             Button(configuration.doneButtonTitle) {
                 performRename()
             }
-        }
-        .confirmationDialog(
-            configuration.shareImportReplaceTitle,
-            isPresented: Binding(
-                get: { shareAwaitingReplacement != nil },
-                set: { if !$0 { shareAwaitingReplacement = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(configuration.shareImportReplaceAction) {
-                if let share = shareAwaitingReplacement {
-                    importShare(share)
-                }
-            }
-            Button(configuration.shareImportLaterAction, role: .cancel) {}
-        } message: {
-            Text(configuration.shareImportReplaceMessage)
-        }
-        .alert(
-            configuration.shareImportErrorTitle,
-            isPresented: Binding(
-                get: { importErrorMessage != nil },
-                set: { if !$0 { importErrorMessage = nil } }
-            )
-        ) {
-            Button(configuration.shareImportErrorOK, role: .cancel) {}
-        } message: {
-            Text(importErrorMessage ?? "")
         }
         .alert(
             configuration.generationFailedTitle,
@@ -292,21 +251,6 @@ public struct AIChatView: View {
             .onChange(of: messages.count) { _, _ in
                 scrollToBottom(proxy)
             }
-            .onChange(of: statusManager.progress) { _, _ in
-                syncActiveResponseMessage(persist: false)
-            }
-            .onChange(of: statusManager.currentStep) { _, _ in
-                syncActiveResponseMessage()
-                scrollToBottom(proxy)
-            }
-            .onChange(of: statusManager.errorMessage) { _, _ in
-                syncActiveResponseMessage()
-                scrollToBottom(proxy)
-            }
-            .onChange(of: statusManager.completedBookTitle) { _, _ in
-                syncActiveResponseMessage()
-                scrollToBottom(proxy)
-            }
         }
     }
 
@@ -340,7 +284,7 @@ public struct AIChatView: View {
         InputBar(
             text: $inputText,
             placeholder: configuration.inputPlaceholder,
-            isProcessing: statusManager.isProcessing,
+            isProcessing: isGenerating,
             hasSubmittableInput: hasSubmittableInput,
             sendAccessibilityLabel: configuration.sendAccessibilityLabel,
             attachAccessibilityLabel: configuration.attachAccessibilityLabel,
@@ -388,7 +332,7 @@ public struct AIChatView: View {
     private func submitMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard hasSubmittableInput,
-              !statusManager.isProcessing,
+              !isGenerating,
               generationTask == nil,
               configuration.validateSession()
         else { return }
@@ -415,17 +359,13 @@ public struct AIChatView: View {
         messages.append(
             ChatMessage.assistant(
                 id: responseID,
-                title: configuration.processingTitle,
-                body: configuration.startingBody,
-                progress: 0,
+                body: "",
                 isProgressing: true,
                 isError: false
             )
         )
 
-        statusManager.apply(.starting)
-
-        let shareToConsume = importedShare
+        isGenerating = true
 
         inputText = ""
         selectedImageData = nil
@@ -434,7 +374,7 @@ public struct AIChatView: View {
         generationTask = Task { @MainActor in
             defer {
                 generationTask = nil
-                checkPendingShare()
+                isGenerating = false
             }
 
             let input = MessageInput(text: text.isEmpty ? nil : text, imageData: formImageData)
@@ -454,10 +394,6 @@ public struct AIChatView: View {
 
                 do {
                     try configuration.saveConversation(detail)
-                    if let share = shareToConsume {
-                        try configuration.resolveShare(share)
-                        importedShare = nil
-                    }
                 } catch {
                     messages = previousMessages
                     activeResponseMessageID = previousResponseMessageID
@@ -467,20 +403,31 @@ public struct AIChatView: View {
                     return
                 }
 
-                try await configuration.submitMessage(input) { [weak statusManager] update in
+                try await configuration.submitMessage(input) { text in
                     Task { @MainActor in
-                        statusManager?.apply(update)
+                        guard let index = messages.firstIndex(where: { $0.id == responseID }) else { return }
+                        messages[index].body = text
                     }
                 }
 
                 guard !Task.isCancelled, configuration.validateSession() else { return }
-                syncActiveResponseMessage()
+
+                if let index = messages.firstIndex(where: { $0.id == responseID }) {
+                    messages[index].isProgressing = false
+                }
+
+                try persistActiveConversation()
+                activeResponseMessageID = nil
                 refreshConversations()
                 focusInput()
             } catch is CancellationError {
-                statusManager.reset()
+                // Cancellation is expected — no action needed.
             } catch {
-                syncActiveResponseMessage()
+                if let index = messages.firstIndex(where: { $0.id == responseID }) {
+                    messages[index].body = error.localizedDescription
+                    messages[index].isProgressing = false
+                    messages[index].isError = true
+                }
                 refreshConversations()
             }
         }
@@ -489,108 +436,6 @@ public struct AIChatView: View {
     private func cancelGenerationIfSessionChanged() {
         guard generationTask != nil, !configuration.validateSession() else { return }
         generationTask?.cancel()
-    }
-
-    // MARK: - Share Handling
-
-    private func checkPendingShare() {
-        guard !statusManager.isProcessing,
-              generationTask == nil,
-              shareAwaitingReplacement == nil,
-              let share = configuration.pendingShare()
-        else { return }
-
-        guard importedShare?.id != share.id else { return }
-
-        if hasSubmittableInput {
-            shareAwaitingReplacement = share
-        } else {
-            importShare(share)
-        }
-    }
-
-    private func importShare(_ share: IncomingShare) {
-        guard !statusManager.isProcessing,
-              generationTask == nil,
-              importedShare?.id != share.id
-        else { return }
-
-        do {
-            let imageData = try configuration.shareImageData(share)
-            if let imageData {
-                guard imageData.count <= 10_000_000 else {
-                    throw NSError(domain: "AIChatUI", code: 1, userInfo: [
-                        NSLocalizedDescriptionKey: configuration.shareImportErrorMessage
-                    ])
-                }
-            }
-
-            startNewConversation()
-            inputText = share.text ?? ""
-            selectedImageData = imageData
-            importedShare = share
-            shareAwaitingReplacement = nil
-            focusInput(afterDelay: false)
-        } catch {
-            importErrorMessage = configuration.shareImportErrorMessage
-        }
-    }
-
-    // MARK: - Active Response Sync
-
-    private func syncActiveResponseMessage(persist: Bool = true) {
-        guard let activeResponseMessageID,
-              let index = messages.firstIndex(where: { $0.id == activeResponseMessageID }) else {
-            return
-        }
-
-        let previousMessage = messages[index]
-
-        if let errorMessage = statusManager.errorMessage, !errorMessage.isEmpty {
-            messages[index].title = configuration.errorTitle
-            messages[index].body = errorMessage
-            messages[index].progress = statusManager.progress
-            messages[index].isProgressing = false
-            messages[index].isError = true
-        } else if let completedTitle = statusManager.completedBookTitle {
-            messages[index].title = configuration.completedTitle
-            messages[index].body = String(format: configuration.completedBodyFormat, completedTitle)
-            messages[index].progress = 1
-            messages[index].isProgressing = false
-            messages[index].isError = false
-        } else if statusManager.isProcessing {
-            messages[index].title = configuration.processingTitle
-            messages[index].body = statusManager.currentStep.isEmpty
-                ? configuration.startingBody
-                : statusManager.currentStep
-            messages[index].progress = statusManager.progress
-            messages[index].isProgressing = true
-            messages[index].isError = false
-        } else {
-            messages[index].title = configuration.completedTitle
-            messages[index].body = statusManager.currentStep.isEmpty
-                ? configuration.completedTitle
-                : statusManager.currentStep
-            messages[index].progress = 0
-            messages[index].isProgressing = false
-            messages[index].isError = false
-        }
-
-        let isStillProgressing = messages[index].isProgressing
-
-        if persist || !isStillProgressing {
-            do {
-                try persistActiveConversation()
-            } catch {
-                messages[index] = previousMessage
-                presentPersistenceError()
-                return
-            }
-        }
-
-        if !isStillProgressing {
-            self.activeResponseMessageID = nil
-        }
     }
 
     private func persistActiveConversation() throws {
@@ -622,8 +467,7 @@ public struct AIChatView: View {
         messages = detail.messages
         activeResponseMessageID = nil
         selectedImageData = nil
-        importedShare = nil
-        statusManager.reset()
+        isGenerating = false
         focusInput()
     }
 
@@ -634,8 +478,7 @@ public struct AIChatView: View {
         activeResponseMessageID = nil
         selectedImageData = nil
         inputText = ""
-        importedShare = nil
-        statusManager.reset()
+        isGenerating = false
         focusInput()
     }
 
