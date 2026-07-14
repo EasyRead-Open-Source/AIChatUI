@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 import MarkdownView
 
 struct AssistantMessageRow: View {
@@ -22,22 +25,11 @@ struct AssistantMessageRow: View {
                 .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Text(aiName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-
-                    Text(message.title ?? "")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+                Text(aiName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    if message.isProgressing {
-                        ProgressView(value: message.progress ?? 0)
-                            .tint(.accentColor)
-                    }
-
                     messageBodyView
                 }
                 .padding(.horizontal, 14)
