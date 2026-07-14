@@ -11,9 +11,13 @@ let package = Package(
             targets: ["AIChatUI"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/LiYanan2004/MarkdownView.git", branch: "main")
+    ],
     targets: [
         .target(
             name: "AIChatUI",
+            dependencies: ["MarkdownView"],
             path: "Sources/AIChatUI"
         )
     ]

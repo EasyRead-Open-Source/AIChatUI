@@ -6,12 +6,15 @@
 //
 
 import SwiftUI
+import MarkdownView
 
 struct AssistantMessageRow: View {
     let message: ChatMessage
     let aiName: String
     let avatarImage: UIImage?
     let avatarFallbackText: String
+
+    @State private var markdownSource = StreamingMarkdownSource()
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -35,10 +38,7 @@ struct AssistantMessageRow: View {
                             .tint(.accentColor)
                     }
 
-                    Text(message.body ?? "")
-                        .font(.body)
-                        .foregroundStyle(message.isError ? Color.red : Color.primary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    messageBodyView
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -48,6 +48,36 @@ struct AssistantMessageRow: View {
             Spacer(minLength: 48)
         }
         .accessibilityIdentifier("aiChat.responseStatus")
+        .onAppear {
+            markdownSource.text = message.body ?? ""
+            if !message.isProgressing {
+                markdownSource.finishStreaming()
+            }
+        }
+        .onChange(of: message.body ?? "") { _, newBody in
+            markdownSource.text = newBody
+        }
+        .onChange(of: message.isProgressing) { _, isProgressing in
+            if !isProgressing {
+                markdownSource.finishStreaming()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var messageBodyView: some View {
+        if message.isError {
+            Text(message.body ?? "")
+                .font(.body)
+                .foregroundStyle(Color.red)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if message.isProgressing {
+            StreamingMarkdownReader(markdownSource) { parseResult in
+                MarkdownView(parseResult)
+            }
+        } else {
+            MarkdownView(message.body ?? "")
+        }
     }
 }
 
