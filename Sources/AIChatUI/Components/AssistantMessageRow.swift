@@ -63,12 +63,18 @@ struct AssistantMessageRow: View {
                 .font(.body)
                 .foregroundStyle(Color.red)
                 .fixedSize(horizontal: false, vertical: true)
-        } else if message.isProgressing {
-            StreamingMarkdownReader(markdownSource) { parseResult in
-                MarkdownView(parseResult)
-            }
         } else {
-            MarkdownView(message.body ?? "")
+            if let body = message.body, !body.isEmpty{
+                if message.isProgressing {
+                    StreamingMarkdownReader(markdownSource) { parseResult in
+                        MarkdownView(parseResult)
+                    }
+                } else {
+                    MarkdownView(message.body ?? "")
+                }
+            } else {
+                ProgressView()
+            }
         }
     }
 }
