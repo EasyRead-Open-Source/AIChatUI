@@ -69,6 +69,7 @@ struct AssistantMessageRow: View {
                     StreamingMarkdownReader(markdownSource) { parseResult in
                         MarkdownView(parseResult)
                     }
+                    .markdownStreamingAnimation(.blur)
                 } else {
                     MarkdownView(message.body ?? "")
                 }
