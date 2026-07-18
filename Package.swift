@@ -12,7 +12,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/LiYanan2004/MarkdownView.git", branch: "main")
+        .package(url: "https://github.com/guoPhineas/MarkdownView", branch: "phg/features/260716")
     ],
     targets: [
         .target(
