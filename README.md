@@ -1,5 +1,11 @@
 # AIChatUI
 
+> [!IMPORTANT]
+>
+> This project is currently **not completed** and there may be changes to the API. The current status is only for experimental projects.
+>
+> **Waiting for refactoring.**
+
 A reusable SwiftUI chat interface for AI-powered conversations, distributed as a Swift Package.
 
 ## Overview
@@ -68,4 +74,4 @@ All user-facing strings are configured through `AIChatConfiguration` properties.
 
 ## License
 
-Internal use — part of the EasyRead project.
+MIT
