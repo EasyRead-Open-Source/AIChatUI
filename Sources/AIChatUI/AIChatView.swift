@@ -201,7 +201,6 @@ public struct AIChatView: View {
         VStack(spacing: 0) {
             Divider()
                 .overlay(Color.primary.opacity(0.08))
-                .ignoresSafeArea(.keyboard)
             
             composerSurface
                 .frame(maxWidth: AIChatLayout.composerMaxWidth)
@@ -212,7 +211,6 @@ public struct AIChatView: View {
         .background {
             Rectangle()
                 .fill(.ultraThinMaterial)
-                .ignoresSafeArea(.keyboard)
         }
     }
 
