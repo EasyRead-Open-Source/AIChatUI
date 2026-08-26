@@ -107,7 +107,7 @@ public struct AIChatView: View {
     }
 
     public var body: some View {
-        NavigationView {
+        NavigationStack {
             conversationView
                 .navigationTitle(conversation.title ?? title)
                 .navigationBarTitleDisplayMode(.inline)
