@@ -271,30 +271,30 @@ public struct AIChatView: View {
             }
 
             HStack(spacing: AIChatLayout.composerControlSpacing) {
-#if os(iOS) || os(macOS) || os(visionOS)
-                Button {} label: {
-                    Image(systemName: speechInput.isRecording ? "waveform" : "mic")
-                        .font(.system(size: AIChatLayout.microphoneIconSize, weight: .medium))
-                        .foregroundStyle(speechInput.isRecording ? Color.accentColor : Color.primary)
-                        .frame(
-                            width: AIChatLayout.accessoryControlSize,
-                            height: AIChatLayout.composerControlHeight
-                        )
-                }
-                .buttonStyle(.plain)
-                .onLongPressGesture(
-                    minimumDuration: 0.25,
-                    maximumDistance: 50,
-                    pressing: { isPressing in
-                        if !isPressing {
-                            endSpeechInput()
-                        }
-                    },
-                    perform: startSpeechInput
-                )
-                .accessibilityLabel(String(localized: "Hold to speak", bundle: .module))
-                .accessibilityHint(String(localized: "Hold to speak, release to stop", bundle: .module))
-#endif
+//#if os(iOS) || os(macOS) || os(visionOS)
+//                Button {} label: {
+//                    Image(systemName: speechInput.isRecording ? "waveform" : "mic")
+//                        .font(.system(size: AIChatLayout.microphoneIconSize, weight: .medium))
+//                        .foregroundStyle(speechInput.isRecording ? Color.accentColor : Color.primary)
+//                        .frame(
+//                            width: AIChatLayout.accessoryControlSize,
+//                            height: AIChatLayout.composerControlHeight
+//                        )
+//                }
+//                .buttonStyle(.plain)
+//                .onLongPressGesture(
+//                    minimumDuration: 0.25,
+//                    maximumDistance: 50,
+//                    pressing: { isPressing in
+//                        if !isPressing {
+//                            endSpeechInput()
+//                        }
+//                    },
+//                    perform: startSpeechInput
+//                )
+//                .accessibilityLabel(String(localized: "Hold to speak", bundle: .module))
+//                .accessibilityHint(String(localized: "Hold to speak, release to stop", bundle: .module))
+//#endif
 
                 TextField(placeholder, text: $draft, axis: .vertical)
                     .font(.body)
