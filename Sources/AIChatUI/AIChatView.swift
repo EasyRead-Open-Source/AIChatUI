@@ -199,7 +199,9 @@ public struct AIChatView: View {
 
     private var composerLayout: some View {
         VStack(spacing: 0) {
-            Divider().overlay(Color.primary.opacity(0.08))
+            Divider()
+                .overlay(Color.primary.opacity(0.08))
+                .ignoresSafeArea(.keyboard)
             
             composerSurface
                 .frame(maxWidth: AIChatLayout.composerMaxWidth)
@@ -208,11 +210,9 @@ public struct AIChatView: View {
                 .padding(.vertical, AIChatLayout.composerOuterVerticalPadding)
         }
         .background {
-            if !isInputFocused{
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .ignoresSafeArea()
-            }
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea(.keyboard)
         }
     }
 
