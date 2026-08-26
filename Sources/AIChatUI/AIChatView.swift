@@ -107,20 +107,13 @@ public struct AIChatView: View {
     }
 
     public var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(.background)
-                .ignoresSafeArea()
+        NavigationView {
             conversationView
+                .navigationTitle(conversation.title ?? title)
+                .navigationBarTitleDisplayMode(.inline)
+                .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         }
-        .safeAreaInset(edge: .top, spacing: 0, content: {
-            VStack(spacing: 0) {
-                header
-                Divider().overlay(Color.primary.opacity(0.08))
-            }
-            .background(.ultraThinMaterial)
-        })
-        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        
         .alert(String(localized: "Send Failed", bundle: .module), isPresented: errorPresented) {
             Button(String(localized: "OK", bundle: .module), role: .cancel) {}
         } message: {
@@ -149,17 +142,6 @@ public struct AIChatView: View {
             speechInput.cancel()
         }
         .accessibilityIdentifier("aiChat.root")
-    }
-
-    private var header: some View {
-        ZStack {
-            Text(conversation.title ?? title)
-                .font(AIChatLayout.titleFont.weight(.semibold))
-                .foregroundStyle(.primary)
-
-        }
-        .padding(.horizontal, AIChatLayout.headerHorizontalPadding)
-        .padding(.vertical, AIChatLayout.headerVerticalPadding)
     }
 
     private var headerControlRow: some View {
