@@ -39,7 +39,6 @@ public struct AIChatView: View {
     private let title: String
     private let placeholder: String
     private let onSend: SendHandler
-    private let onShowConversations: (() -> Void)?
     private let onDismiss: (() -> Void)?
     private let onMicrophoneTap: (() -> Void)?
 
@@ -76,7 +75,6 @@ public struct AIChatView: View {
         self.roles = roles
         self.title = title ?? String(localized: "Conversation", bundle: .module)
         self.placeholder = placeholder ?? String(localized: "Type a message...", bundle: .module)
-        self.onShowConversations = onShowConversations
         self.onDismiss = onDismiss
         self.onMicrophoneTap = onMicrophoneTap
         self.onSend = onSend
@@ -142,26 +140,6 @@ public struct AIChatView: View {
             speechInput.cancel()
         }
         .accessibilityIdentifier("aiChat.root")
-    }
-
-    private var headerControlRow: some View {
-        HStack {
-            if let onShowConversations {
-                HeaderButton(systemName: "sidebar.left", action: onShowConversations)
-                    .accessibilityLabel(String(localized: "Show conversations", bundle: .module))
-            } else {
-                Color.clear.frame(width: 52, height: 52)
-            }
-
-            Spacer()
-
-            if let onDismiss {
-                HeaderButton(systemName: "chevron.down", action: onDismiss)
-                    .accessibilityLabel(String(localized: "Close", bundle: .module))
-            } else {
-                Color.clear.frame(width: 52, height: 52)
-            }
-        }
     }
 
     @ViewBuilder
