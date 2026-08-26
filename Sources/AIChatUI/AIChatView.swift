@@ -302,7 +302,7 @@ public struct AIChatView: View {
                 Button(action: submit) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: AIChatLayout.sendIconSize, weight: .bold))
-                        .foregroundStyle(.background)
+                        .foregroundStyle(.white)
                         .frame(width: AIChatLayout.sendButtonSize, height: AIChatLayout.sendButtonSize)
                         .background(sendButtonColor, in: Circle())
                 }
