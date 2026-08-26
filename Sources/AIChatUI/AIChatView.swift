@@ -143,7 +143,7 @@ public struct AIChatView: View {
     private var conversationView: some View {
 #if os(iOS) || os(macOS)
         conversationScrollView
-            .scrollDismissesKeyboard(.interactively)
+            .scrollDismissesKeyboard(.immediately)
 #else
         conversationScrollView
 #endif
@@ -199,15 +199,27 @@ public struct AIChatView: View {
 
     private var composerLayout: some View {
         VStack(spacing: 0) {
-            Divider().overlay(Color.primary.opacity(0.08))
-
+            if !isInputFocused{
+                Divider().overlay(Color.primary.opacity(0.08))
+            }
+            
             composerSurface
                 .frame(maxWidth: AIChatLayout.composerMaxWidth)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, AIChatLayout.composerOuterHorizontalPadding)
                 .padding(.vertical, AIChatLayout.composerOuterVerticalPadding)
         }
-        .background(.ultraThinMaterial)
+        .background {
+            if !isInputFocused{
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .ignoresSafeArea()
+            } else {
+                Rectangle()
+                    .fill(.clear)
+                    .ignoresSafeArea()
+            }
+        }
     }
 
     @ViewBuilder
