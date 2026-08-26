@@ -4,7 +4,13 @@ import PackageDescription
 
 let package = Package(
     name: "AIChatUI",
-    platforms: [.iOS(.v18)],
+    platforms: [
+        .iOS(.v18),
+        .macOS(.v15),
+        .tvOS(.v18),
+        .watchOS(.v11),
+        .visionOS(.v2),
+    ],
     products: [
         .library(
             name: "AIChatUI",
@@ -18,7 +24,8 @@ let package = Package(
         .target(
             name: "AIChatUI",
             dependencies: ["MarkdownView"],
-            path: "Sources/AIChatUI"
+            path: "Sources/AIChatUI",
+            resources: [.process("Resources")]
         )
     ]
 )
