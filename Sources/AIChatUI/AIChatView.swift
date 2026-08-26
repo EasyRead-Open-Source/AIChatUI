@@ -211,6 +211,7 @@ public struct AIChatView: View {
         .background {
             Rectangle()
                 .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
         }
     }
 
