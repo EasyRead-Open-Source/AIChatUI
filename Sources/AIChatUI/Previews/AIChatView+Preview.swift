@@ -58,7 +58,6 @@ private struct AIChatPreviewContainer: View {
         AIChatView(
             conversation: $conversation,
             roles: [Self.analyst, Self.designer],
-            onShowConversations: {},
             onDismiss: {}
         ) { _, update in
             let responseID = UUID()

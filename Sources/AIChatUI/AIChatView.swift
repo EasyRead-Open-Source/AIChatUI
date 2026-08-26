@@ -66,7 +66,6 @@ public struct AIChatView: View {
         roles: [AIChatRole],
         title: String? = nil,
         placeholder: String? = nil,
-        onShowConversations: (() -> Void)? = nil,
         onDismiss: (() -> Void)? = nil,
         onMicrophoneTap: (() -> Void)? = nil,
         onSend: @escaping SendHandler
@@ -86,7 +85,6 @@ public struct AIChatView: View {
         role: AIChatRole,
         title: String? = nil,
         placeholder: String? = nil,
-        onShowConversations: (() -> Void)? = nil,
         onDismiss: (() -> Void)? = nil,
         onMicrophoneTap: (() -> Void)? = nil,
         onSend: @escaping @MainActor (AIChatInput) async throws -> AIChatResponse
@@ -96,7 +94,6 @@ public struct AIChatView: View {
             roles: [role],
             title: title,
             placeholder: placeholder,
-            onShowConversations: onShowConversations,
             onDismiss: onDismiss,
             onMicrophoneTap: onMicrophoneTap
         ) { input, update in
