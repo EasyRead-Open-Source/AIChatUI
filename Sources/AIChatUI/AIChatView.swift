@@ -41,6 +41,7 @@ public struct AIChatView: View {
     private let onSend: SendHandler
     private let onDismiss: (() -> Void)?
     private let onMicrophoneTap: (() -> Void)?
+    @ViewBuilder private let reminderArea: (any View)?
 
     @State private var draft = ""
     @State private var attachments: [AIChatInput.Attachment] = []
@@ -57,7 +58,7 @@ public struct AIChatView: View {
     @State private var errorMessage: String?
     @FocusState private var isInputFocused: Bool
 
-    private static let bottomAnchor = "ai-chat-bottom-anchor"
+    private let bottomAnchor = "ai-chat-bottom-anchor"
 
     /// Creates a chat supporting either one or many AI roles.
     /// Call `onUpdate` repeatedly with the same response ID to replace it in place.
@@ -66,6 +67,7 @@ public struct AIChatView: View {
         roles: [AIChatRole],
         title: String? = nil,
         placeholder: String? = nil,
+        reminderArea: (() -> any View)? = nil,
         onDismiss: (() -> Void)? = nil,
         onMicrophoneTap: (() -> Void)? = nil,
         onSend: @escaping SendHandler
@@ -74,6 +76,7 @@ public struct AIChatView: View {
         self.roles = roles
         self.title = title ?? String(localized: "Conversation", bundle: .module)
         self.placeholder = placeholder ?? String(localized: "Type a message...", bundle: .module)
+        self.reminderArea = reminderArea?()
         self.onDismiss = onDismiss
         self.onMicrophoneTap = onMicrophoneTap
         self.onSend = onSend
@@ -85,6 +88,7 @@ public struct AIChatView: View {
         role: AIChatRole,
         title: String? = nil,
         placeholder: String? = nil,
+        reminderArea: (() -> any View)? = nil,
         onDismiss: (() -> Void)? = nil,
         onMicrophoneTap: (() -> Void)? = nil,
         onSend: @escaping @MainActor (AIChatInput) async throws -> AIChatResponse
@@ -94,6 +98,7 @@ public struct AIChatView: View {
             roles: [role],
             title: title,
             placeholder: placeholder,
+            reminderArea: reminderArea,
             onDismiss: onDismiss,
             onMicrophoneTap: onMicrophoneTap
         ) { input, update in
@@ -157,7 +162,7 @@ public struct AIChatView: View {
                         MessageRow(message: message).id(message.id)
                     }
 
-                    Color.clear.frame(height: 1).id(Self.bottomAnchor)
+                    Color.clear.frame(height: 1).id(bottomAnchor)
                 }
                 .frame(maxWidth: AIChatLayout.contentMaxWidth)
                 .frame(maxWidth: .infinity)
@@ -199,19 +204,27 @@ public struct AIChatView: View {
 
     private var composerLayout: some View {
         VStack(spacing: 0) {
-            Divider()
-                .overlay(Color.primary.opacity(0.08))
             
-            composerSurface
-                .frame(maxWidth: AIChatLayout.composerMaxWidth)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, AIChatLayout.composerOuterHorizontalPadding)
-                .padding(.vertical, AIChatLayout.composerOuterVerticalPadding)
-        }
-        .background {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea()
+            if let reminderArea = reminderArea {
+                AnyView(reminderArea)
+            }
+            
+            VStack(spacing: 0) {
+                
+                Divider()
+                    .overlay(Color.primary.opacity(0.08))
+                
+                composerSurface
+                    .frame(maxWidth: AIChatLayout.composerMaxWidth)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, AIChatLayout.composerOuterHorizontalPadding)
+                    .padding(.vertical, AIChatLayout.composerOuterVerticalPadding)
+            }
+            .background {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .ignoresSafeArea()
+            }
         }
     }
 
@@ -434,10 +447,10 @@ public struct AIChatView: View {
     private func scrollToBottom(using proxy: ScrollViewProxy, animated: Bool = true) {
         if animated {
             withAnimation(.easeOut(duration: 0.22)) {
-                proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+                proxy.scrollTo(bottomAnchor, anchor: .bottom)
             }
         } else {
-            proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+            proxy.scrollTo(bottomAnchor, anchor: .bottom)
         }
     }
 }

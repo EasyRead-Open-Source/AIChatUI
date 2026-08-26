@@ -58,7 +58,9 @@ private struct AIChatPreviewContainer: View {
         AIChatView(
             conversation: $conversation,
             roles: [Self.analyst, Self.designer],
-            onDismiss: {}
+            reminderArea: {
+                Text("Reminder")
+            }, onDismiss: {}
         ) { _, update in
             let responseID = UUID()
             let chunks = [
