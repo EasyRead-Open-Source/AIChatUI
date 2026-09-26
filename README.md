@@ -17,7 +17,7 @@ AIChatUI is a reusable SwiftUI package for building single-role and multi-role A
 - English base localization with Simplified Chinese translations
 - Platform-adaptive layouts for iOS, macOS, tvOS, watchOS, and visionOS
 
-AIChatUI does not display a separate “waiting for response” message after the user sends a message. A response appears when the send handler provides its first update.
+The send handler starts immediately after submission. The waiting indicator and assistant responses appear only after the text finishes moving into its bubble; streaming updates received during that animation are buffered, keeping the latest update for each response ID. The temporary waiting indicator remains until the first nonempty Markdown update or custom response view arrives, or until the send handler finishes, fails, or is cancelled. The indicator is presentation state and is never added to `conversation.messages`. Sending and waiting animations respect the system Reduce Motion setting.
 
 ## Requirements
 

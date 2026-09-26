@@ -62,6 +62,7 @@ private struct AIChatPreviewContainer: View {
                 Text("Reminder")
             }, onDismiss: {}
         ) { _, update in
+            try await Task.sleep(for: .seconds(2))
             let responseID = UUID()
             let chunks = [
                 "### Streaming Response\n\n",

@@ -54,8 +54,14 @@ public struct AIChatView: View {
     @State private var isCameraPresented = false
 #endif
     @State private var isSending = false
+    @State private var isAwaitingResponse = false
+    @State private var composerTextFrame = CGRect.zero
+    @State private var sendFlight: MessageSendFlight?
+    @State private var deferredResponses: [AIChatResponse] = []
+    @State private var deferredConversationTitle: String?
     @State private var sendTask: Task<Void, Never>?
     @State private var errorMessage: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var isInputFocused: Bool
 
     private let bottomAnchor = "ai-chat-bottom-anchor"
@@ -112,6 +118,15 @@ public struct AIChatView: View {
                 .navigationTitle(conversation.title ?? title)
                 .navigationBarTitleDisplayMode(.inline)
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+                .coordinateSpace(name: MessageSendFlight.coordinateSpace)
+                .overlay(alignment: .topLeading) {
+                    if let sendFlight {
+                        MessageSendFlightView(flight: sendFlight) {
+                            finishSendFlight(id: sendFlight.id)
+                        }
+                        .id(sendFlight.id)
+                    }
+                }
         }
         
         .alert(String(localized: "Send Failed", bundle: .module), isPresented: errorPresented) {
@@ -138,8 +153,12 @@ public struct AIChatView: View {
         }
 #endif
         .onDisappear {
-            sendTask?.cancel()
+            cancelSend()
             speechInput.cancel()
+        }
+        .onChange(of: conversation.id) { _, _ in cancelSend() }
+        .onChange(of: reduceMotion) { _, enabled in
+            if enabled, let id = sendFlight?.id { finishSendFlight(id: id) }
         }
         .accessibilityIdentifier("aiChat.root")
     }
@@ -159,7 +178,19 @@ public struct AIChatView: View {
             ScrollView {
                 LazyVStack(spacing: AIChatLayout.messageSpacing) {
                     ForEach(conversation.messages) { message in
-                        MessageRow(message: message).id(message.id)
+                        MessageRow(
+                            message: message,
+                            isSendingText: sendFlight?.id == message.id,
+                            onTextFrameChange: { frame in
+                                guard sendFlight?.id == message.id else { return }
+                                sendFlight?.destination = frame
+                            }
+                        )
+                        .id(message.id)
+                    }
+
+                    if isAwaitingResponse {
+                        AssistantWaitingRow()
                     }
 
                     Color.clear.frame(height: 1).id(bottomAnchor)
@@ -172,7 +203,11 @@ public struct AIChatView: View {
             .onAppear { scrollToBottom(using: proxy, animated: false) }
             // `updatedAt` also changes when streaming replaces an existing response.
             .onChange(of: conversation.updatedAt) { _, _ in
-                scrollToBottom(using: proxy)
+                // Settle the destination before the flying text starts moving.
+                scrollToBottom(using: proxy, animated: sendFlight == nil)
+            }
+            .onChange(of: isAwaitingResponse) { _, _ in
+                scrollToBottom(using: proxy, animated: sendFlight == nil)
             }
         }
     }
@@ -296,6 +331,9 @@ public struct AIChatView: View {
                     .focused($isInputFocused)
                     .submitLabel(.send)
                     .onSubmit(submit)
+                    .onGeometryChange(for: CGRect.self) { geometry in
+                        geometry.frame(in: .named(MessageSendFlight.coordinateSpace))
+                    } action: { composerTextFrame = $0 }
 
                 attachmentMenu
 
@@ -307,7 +345,7 @@ public struct AIChatView: View {
                         .background(sendButtonColor, in: Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!canSubmit || isSending)
+                .disabled(!canSubmit || isSending || sendFlight != nil)
                 .accessibilityLabel(String(localized: "Send", bundle: .module))
             }
             .foregroundStyle(.primary)
@@ -354,7 +392,7 @@ public struct AIChatView: View {
     }
 
     private var sendButtonColor: Color {
-        canSubmit && !isSending ? .accentColor : .secondary.opacity(0.35)
+        canSubmit && !isSending && sendFlight == nil ? .accentColor : .secondary.opacity(0.35)
     }
 
     private var errorPresented: Binding<Bool> {
@@ -366,31 +404,76 @@ public struct AIChatView: View {
 
     private func submit() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSubmit, !isSending else { return }
+        guard canSubmit, !isSending, sendFlight == nil else { return }
 
         let input = AIChatInput(
             text: trimmedText.isEmpty ? nil : trimmedText,
             attachments: attachments
         )
+        if let text = input.text, !reduceMotion, composerTextFrame.width > 0, composerTextFrame.height > 0 {
+            sendFlight = MessageSendFlight(
+                id: input.id,
+                sourceText: draft,
+                text: text,
+                source: composerTextFrame
+            )
+        }
+        let conversationID = conversation.id
         conversation.messages.append(.user(input))
         conversation.updatedAt = .now
         draft = ""
         attachments = []
         isSending = true
+        isAwaitingResponse = sendFlight == nil
 
         sendTask = Task {
             defer {
-                isSending = false
-                sendTask = nil
+                if !Task.isCancelled, conversation.id == conversationID {
+                    isSending = false
+                    isAwaitingResponse = false
+                    sendTask = nil
+                }
             }
             do {
-                try await onSend(input) { response in upsert(response) }
+                try await onSend(input) { response in
+                    guard !Task.isCancelled, conversation.id == conversationID else { return }
+                    receive(response)
+                }
             } catch is CancellationError {
                 return
             } catch {
+                guard !Task.isCancelled, conversation.id == conversationID else { return }
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func finishSendFlight(id: UUID) {
+        guard sendFlight?.id == id else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            sendFlight = nil
+            isAwaitingResponse = isSending
+            // Publish only the latest chunk for each response, in message order.
+            // The request has already been running throughout the flight.
+            for response in deferredResponses { upsert(response) }
+            if let deferredConversationTitle {
+                conversation.title = deferredConversationTitle
+            }
+            deferredResponses = []
+            deferredConversationTitle = nil
+        }
+    }
+
+    private func cancelSend() {
+        sendTask?.cancel()
+        sendTask = nil
+        isSending = false
+        isAwaitingResponse = false
+        sendFlight = nil
+        deferredResponses = []
+        deferredConversationTitle = nil
     }
 
     private func startSpeechInput() {
@@ -411,7 +494,30 @@ public struct AIChatView: View {
         return "\(prefix) \(transcript)"
     }
 
+    private func receive(_ response: AIChatResponse) {
+        guard sendFlight != nil else {
+            upsert(response)
+            return
+        }
+        if let title = response.conversationTitle { deferredConversationTitle = title }
+        var deferred = response
+        deferred.conversationTitle = nil
+        if let index = deferredResponses.firstIndex(where: { $0.id == response.id }) {
+            deferredResponses[index] = deferred
+        } else {
+            deferredResponses.append(deferred)
+        }
+    }
+
     private func upsert(_ response: AIChatResponse) {
+        switch response.content {
+        case .markdown(let text):
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                isAwaitingResponse = false
+            }
+        case .view:
+            isAwaitingResponse = false
+        }
         if let conversationTitle = response.conversationTitle {
             conversation.title = conversationTitle
         }
@@ -445,7 +551,7 @@ public struct AIChatView: View {
 #endif
 
     private func scrollToBottom(using proxy: ScrollViewProxy, animated: Bool = true) {
-        if animated {
+        if animated && !reduceMotion {
             withAnimation(.easeOut(duration: 0.22)) {
                 proxy.scrollTo(bottomAnchor, anchor: .bottom)
             }
@@ -532,10 +638,17 @@ private struct HeaderButton: View {
 
 private struct MessageRow: View {
     let message: AIConversation.Message
+    let isSendingText: Bool
+    let onTextFrameChange: (CGRect) -> Void
 
     var body: some View {
         switch message {
-        case .user(let input): UserMessageRow(input: input)
+        case .user(let input):
+            UserMessageRow(
+                input: input,
+                isSendingText: isSendingText,
+                onTextFrameChange: onTextFrameChange
+            )
         case .assistant(let response): AssistantMessageRow(response: response)
         }
     }
@@ -543,6 +656,8 @@ private struct MessageRow: View {
 
 private struct UserMessageRow: View {
     let input: AIChatInput
+    let isSendingText: Bool
+    let onTextFrameChange: (CGRect) -> Void
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 44) {
@@ -554,13 +669,23 @@ private struct UserMessageRow: View {
                 if let text = input.text, !text.isEmpty {
                     Text(text)
                         .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
                         .chatTextSelection()
+                        .onGeometryChange(for: CGRect?.self) { geometry in
+                            isSendingText
+                                ? geometry.frame(in: .named(MessageSendFlight.coordinateSpace))
+                                : nil
+                        } action: { frame in
+                            if let frame { onTextFrameChange(frame) }
+                        }
                         .padding(.horizontal, AIChatLayout.bubbleHorizontalPadding)
                         .padding(.vertical, AIChatLayout.bubbleVerticalPadding)
                         .background(
                             Color.secondary.opacity(0.18),
                             in: RoundedRectangle(cornerRadius: AIChatLayout.bubbleCornerRadius)
                         )
+                        .opacity(isSendingText ? 0 : 1)
                 }
             }
         }
@@ -731,7 +856,7 @@ private struct AttachmentPreview: View {
     }
 }
 
-private enum AIChatLayout {
+enum AIChatLayout {
 #if os(macOS)
     static let titleFont: Font = .subheadline
     static let headerHorizontalPadding: CGFloat = 12
