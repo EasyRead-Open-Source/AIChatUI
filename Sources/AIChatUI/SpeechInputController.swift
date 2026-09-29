@@ -17,23 +17,31 @@ import Observation
 final class SpeechInputController {
     private(set) var transcript = ""
     private(set) var isRecording = false
+    private(set) var isProcessing = false
     private(set) var errorMessage: String?
+
+    var isBusy: Bool { isRecording || isProcessing }
 
     private let audioEngine = AVAudioEngine()
     private let recognizer: SFSpeechRecognizer?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var wantsRecording = false
+    private var permissionRequestID: UUID?
     private var hasInstalledAudioTap = false
+    private var recognitionID: UUID?
 
     init(locale: Locale = .current) {
         recognizer = SFSpeechRecognizer(locale: locale)
     }
 
     func begin() async {
-        guard !isRecording else { return }
+        guard !isBusy else { return }
 
         wantsRecording = true
+        let requestID = UUID()
+        permissionRequestID = requestID
+        isProcessing = true
         transcript = ""
         errorMessage = nil
 
@@ -41,9 +49,12 @@ final class SpeechInputController {
             guard await requestPermissions() else {
                 throw SpeechInputError.permissionDenied
             }
-            guard wantsRecording else { return }
+            guard permissionRequestID == requestID, wantsRecording else { return }
             try startAudioRecognition()
+            permissionRequestID = nil
         } catch {
+            guard permissionRequestID == requestID else { return }
+            permissionRequestID = nil
             errorMessage = error.localizedDescription
             stopAudioRecognition(cancelTask: true)
         }
@@ -51,11 +62,24 @@ final class SpeechInputController {
 
     func end() {
         wantsRecording = false
-        stopAudioRecognition(cancelTask: false)
+        guard isRecording else {
+            if permissionRequestID != nil {
+                permissionRequestID = nil
+                isProcessing = false
+            }
+            return
+        }
+
+        stopAudioInput()
+        recognitionRequest?.endAudio()
+        recognitionTask?.finish()
+        isRecording = false
+        isProcessing = true
     }
 
     func cancel() {
         wantsRecording = false
+        permissionRequestID = nil
         stopAudioRecognition(cancelTask: true)
     }
 
@@ -96,6 +120,8 @@ final class SpeechInputController {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         recognitionRequest = request
+        let recognitionID = UUID()
+        self.recognitionID = recognitionID
 
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
@@ -113,8 +139,8 @@ final class SpeechInputController {
             let isFinal = result?.isFinal == true
             let errorDescription = error?.localizedDescription
 
-            Task { @MainActor [weak self, text, isFinal, errorDescription] in
-                guard let self else { return }
+            Task { @MainActor [weak self, text, isFinal, errorDescription, recognitionID] in
+                guard let self, self.recognitionID == recognitionID else { return }
                 if let text {
                     transcript = text
                 }
@@ -129,10 +155,28 @@ final class SpeechInputController {
 
         audioEngine.prepare()
         try audioEngine.start()
+        isProcessing = false
         isRecording = true
     }
 
     private func stopAudioRecognition(cancelTask: Bool) {
+        recognitionID = nil
+        stopAudioInput()
+        recognitionRequest?.endAudio()
+        if cancelTask {
+            recognitionTask?.cancel()
+        }
+        recognitionRequest = nil
+        recognitionTask = nil
+        isRecording = false
+        isProcessing = false
+
+#if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+#endif
+    }
+
+    private func stopAudioInput() {
         if audioEngine.isRunning {
             audioEngine.stop()
         }
@@ -140,20 +184,6 @@ final class SpeechInputController {
             audioEngine.inputNode.removeTap(onBus: 0)
             hasInstalledAudioTap = false
         }
-
-        recognitionRequest?.endAudio()
-        if cancelTask {
-            recognitionTask?.cancel()
-        } else {
-            recognitionTask?.finish()
-        }
-        recognitionRequest = nil
-        recognitionTask = nil
-        isRecording = false
-
-#if os(iOS)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-#endif
     }
 }
 #else
@@ -162,7 +192,10 @@ final class SpeechInputController {
 final class SpeechInputController {
     private(set) var transcript = ""
     private(set) var isRecording = false
+    private(set) var isProcessing = false
     private(set) var errorMessage: String?
+
+    var isBusy: Bool { isRecording || isProcessing }
 
     func begin() async {
         errorMessage = String(localized: "Speech recognition is currently unavailable.", bundle: .module)

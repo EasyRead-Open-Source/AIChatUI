@@ -60,6 +60,7 @@ public struct AIChatView: View {
     @State private var deferredResponses: [AIChatResponse] = []
     @State private var deferredConversationTitle: String?
     @State private var sendTask: Task<Void, Never>?
+    @State private var errorTitle = String(localized: "Send Failed", bundle: .module)
     @State private var errorMessage: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var isInputFocused: Bool
@@ -114,22 +115,10 @@ public struct AIChatView: View {
 
     public var body: some View {
         NavigationStack {
-            conversationView
-                .navigationTitle(conversation.title ?? title)
-                .navigationBarTitleDisplayMode(.inline)
-                .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-                .coordinateSpace(name: MessageSendFlight.coordinateSpace)
-                .overlay(alignment: .topLeading) {
-                    if let sendFlight {
-                        MessageSendFlightView(flight: sendFlight) {
-                            finishSendFlight(id: sendFlight.id)
-                        }
-                        .id(sendFlight.id)
-                    }
-                }
+            navigationContent
         }
         
-        .alert(String(localized: "Send Failed", bundle: .module), isPresented: errorPresented) {
+        .alert(errorTitle, isPresented: errorPresented) {
             Button(String(localized: "OK", bundle: .module), role: .cancel) {}
         } message: {
             Text(errorMessage ?? String(localized: "Unknown error", bundle: .module))
@@ -161,6 +150,30 @@ public struct AIChatView: View {
             if enabled, let id = sendFlight?.id { finishSendFlight(id: id) }
         }
         .accessibilityIdentifier("aiChat.root")
+    }
+
+    @ViewBuilder
+    private var navigationContent: some View {
+#if os(iOS)
+        conversationContent.navigationBarTitleDisplayMode(.inline)
+#else
+        conversationContent
+#endif
+    }
+
+    private var conversationContent: some View {
+        conversationView
+            .navigationTitle(conversation.title ?? title)
+            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+            .coordinateSpace(name: MessageSendFlight.coordinateSpace)
+            .overlay(alignment: .topLeading) {
+                if let sendFlight {
+                    MessageSendFlightView(flight: sendFlight) {
+                        finishSendFlight(id: sendFlight.id)
+                    }
+                    .id(sendFlight.id)
+                }
+            }
     }
 
     @ViewBuilder
@@ -219,6 +232,7 @@ public struct AIChatView: View {
             }
             .onChange(of: speechInput.errorMessage) { _, message in
                 if let message {
+                    errorTitle = String(localized: "Speech Input Failed", bundle: .module)
                     errorMessage = message
                 }
             }
@@ -299,35 +313,45 @@ public struct AIChatView: View {
             }
 
             HStack(spacing: AIChatLayout.composerControlSpacing) {
-//#if os(iOS) || os(macOS) || os(visionOS)
-//                Button {} label: {
-//                    Image(systemName: speechInput.isRecording ? "waveform" : "mic")
-//                        .font(.system(size: AIChatLayout.microphoneIconSize, weight: .medium))
-//                        .foregroundStyle(speechInput.isRecording ? Color.accentColor : Color.primary)
-//                        .frame(
-//                            width: AIChatLayout.accessoryControlSize,
-//                            height: AIChatLayout.composerControlHeight
-//                        )
-//                }
-//                .buttonStyle(.plain)
-//                .onLongPressGesture(
-//                    minimumDuration: 0.25,
-//                    maximumDistance: 50,
-//                    pressing: { isPressing in
-//                        if !isPressing {
-//                            endSpeechInput()
-//                        }
-//                    },
-//                    perform: startSpeechInput
-//                )
-//                .accessibilityLabel(String(localized: "Hold to speak", bundle: .module))
-//                .accessibilityHint(String(localized: "Hold to speak, release to stop", bundle: .module))
-//#endif
+#if os(iOS) || os(macOS) || os(visionOS)
+                Button {
+                    if speechInput.isRecording {
+                        endSpeechInput()
+                    } else {
+                        startSpeechInput()
+                    }
+                } label: {
+                    ZStack {
+                        Image(systemName: speechInput.isRecording ? "waveform" : "mic")
+                            .font(.system(size: AIChatLayout.microphoneIconSize, weight: .medium))
+                            .foregroundStyle(speechInput.isRecording ? Color.accentColor : Color.primary)
+                            .opacity(speechInput.isProcessing ? 0 : 1)
+
+                        if speechInput.isProcessing {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                    .frame(
+                        width: AIChatLayout.accessoryControlSize,
+                        height: AIChatLayout.composerControlHeight
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(speechInput.isProcessing || isSending || sendFlight != nil)
+                .accessibilityLabel(
+                    speechInput.isRecording
+                        ? String(localized: "Stop recording", bundle: .module)
+                        : String(localized: "Start voice input", bundle: .module)
+                )
+                .accessibilityIdentifier("aiChat.microphone")
+#endif
 
                 TextField(placeholder, text: $draft, axis: .vertical)
                     .font(.body)
                     .lineLimit(1...AIChatLayout.maximumInputLines)
                     .textFieldStyle(.plain)
+                    .disabled(speechInput.isBusy)
                     .focused($isInputFocused)
                     .submitLabel(.send)
                     .onSubmit(submit)
@@ -345,7 +369,7 @@ public struct AIChatView: View {
                         .background(sendButtonColor, in: Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!canSubmit || isSending || sendFlight != nil)
+                .disabled(!canSubmit || isSending || sendFlight != nil || speechInput.isBusy)
                 .accessibilityLabel(String(localized: "Send", bundle: .module))
             }
             .foregroundStyle(.primary)
@@ -392,7 +416,8 @@ public struct AIChatView: View {
     }
 
     private var sendButtonColor: Color {
-        canSubmit && !isSending && sendFlight == nil ? .accentColor : .secondary.opacity(0.35)
+        canSubmit && !isSending && sendFlight == nil && !speechInput.isBusy
+            ? .accentColor : .secondary.opacity(0.35)
     }
 
     private var errorPresented: Binding<Bool> {
@@ -404,7 +429,7 @@ public struct AIChatView: View {
 
     private func submit() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSubmit, !isSending, sendFlight == nil else { return }
+        guard canSubmit, !isSending, sendFlight == nil, !speechInput.isBusy else { return }
 
         let input = AIChatInput(
             text: trimmedText.isEmpty ? nil : trimmedText,
@@ -443,6 +468,7 @@ public struct AIChatView: View {
                 return
             } catch {
                 guard !Task.isCancelled, conversation.id == conversationID else { return }
+                errorTitle = String(localized: "Send Failed", bundle: .module)
                 errorMessage = error.localizedDescription
             }
         }
@@ -477,7 +503,7 @@ public struct AIChatView: View {
     }
 
     private func startSpeechInput() {
-        guard !isSending else { return }
+        guard !isSending, sendFlight == nil, !speechInput.isBusy else { return }
         speechInputPrefix = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         isInputFocused = false
         onMicrophoneTap?()

@@ -11,7 +11,7 @@ AIChatUI is a reusable SwiftUI package for building single-role and multi-role A
 - Stateful custom SwiftUI views inside assistant responses
 - Text, image, video, and file attachment models
 - Camera capture on iOS and photo/video selection on supported platforms
-- Press-and-hold speech-to-text input on iOS, macOS, and visionOS
+- Tap-to-record speech-to-text input on iOS, macOS, and visionOS
 - Dynamic conversation titles supplied by callback updates
 - Light mode, dark mode, Material surfaces, and Liquid Glass where available
 - English base localization with Simplified Chinese translations
@@ -215,6 +215,8 @@ iOS apps using camera capture must also provide:
 
 A sandboxed macOS app must enable audio input in its App Sandbox capabilities when speech input is used.
 
+Tap the microphone button to start recording, then tap it again to stop. The recognized text appears in the message composer after recognition finishes; review or edit it before sending.
+
 ## Platform behavior
 
 | Capability | iOS / iPadOS | macOS | tvOS | watchOS | visionOS |
@@ -223,7 +225,7 @@ A sandboxed macOS app must enable audio input in its App Sandbox capabilities wh
 | Markdown and custom views | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Photo/video picker | ✓ | ✓ | — | — | ✓ |
 | Camera capture | ✓ | — | — | — | — |
-| Press-and-hold speech input | ✓ | ✓ | — | — | ✓ |
+| Tap-to-record speech input | ✓ | ✓ | — | — | ✓ |
 | Liquid Glass on version 26+ | ✓ | ✓ | ✓ | ✓ | — |
 
 visionOS uses a native Material surface because SwiftUI currently marks `glassEffect` unavailable there. Mac Catalyst follows the iOS layout and capability paths, except camera capture is not shown.
