@@ -26,6 +26,10 @@ let package = Package(
             dependencies: ["MarkdownView"],
             path: "Sources/AIChatUI",
             resources: [.process("Resources")]
+        ),
+        .testTarget(
+            name: "AIChatUITests",
+            dependencies: ["AIChatUI"]
         )
     ]
 )

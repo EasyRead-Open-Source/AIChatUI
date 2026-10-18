@@ -85,7 +85,7 @@ final class SpeechInputController {
 
     private func requestPermissions() async -> Bool {
         let speechStatus = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
+            SFSpeechRecognizer.requestAuthorization { @Sendable status in
                 continuation.resume(returning: status)
             }
         }
@@ -93,11 +93,11 @@ final class SpeechInputController {
 
         return await withCheckedContinuation { continuation in
 #if os(macOS) || os(visionOS)
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
+            AVCaptureDevice.requestAccess(for: .audio) { @Sendable granted in
                 continuation.resume(returning: granted)
             }
 #else
-            AVAudioApplication.requestRecordPermission { granted in
+            AVAudioApplication.requestRecordPermission { @Sendable granted in
                 continuation.resume(returning: granted)
             }
 #endif
@@ -129,12 +129,38 @@ final class SpeechInputController {
             throw SpeechInputError.audioUnavailable
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
-            request.append(buffer)
-        }
+        inputNode.installTap(
+            onBus: 0,
+            bufferSize: 1_024,
+            format: format,
+            block: Self.audioTap(for: request)
+        )
         hasInstalledAudioTap = true
 
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+        recognitionTask = recognizer.recognitionTask(
+            with: request,
+            resultHandler: recognitionHandler(for: recognitionID)
+        )
+
+        audioEngine.prepare()
+        try audioEngine.start()
+        isProcessing = false
+        isRecording = true
+    }
+
+    // Framework callbacks must not inherit the caller's MainActor isolation.
+    // Keep audio buffers on the audio thread; only copied recognition values
+    // cross to the main actor to update observable state.
+    nonisolated static func audioTap(
+        for request: SFSpeechAudioBufferRecognitionRequest
+    ) -> @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void {
+        { buffer, _ in request.append(buffer) }
+    }
+
+    func recognitionHandler(
+        for recognitionID: UUID
+    ) -> @Sendable (SFSpeechRecognitionResult?, (any Error)?) -> Void {
+        { @Sendable [weak self] result, error in
             let text = result?.bestTranscription.formattedString
             let isFinal = result?.isFinal == true
             let errorDescription = error?.localizedDescription
@@ -152,11 +178,6 @@ final class SpeechInputController {
                 }
             }
         }
-
-        audioEngine.prepare()
-        try audioEngine.start()
-        isProcessing = false
-        isRecording = true
     }
 
     private func stopAudioRecognition(cancelTask: Bool) {
