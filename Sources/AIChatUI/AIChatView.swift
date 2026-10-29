@@ -48,6 +48,9 @@ public struct AIChatView: View {
 #if os(iOS) || os(macOS) || os(visionOS)
     @State private var selectedMediaItems: [PhotosPickerItem] = []
 #endif
+#if os(iOS)
+    @State private var isPhotoPickerPresented = false
+#endif
     @State private var speechInput = SpeechInputController()
     @State private var speechInputPrefix = ""
 #if os(iOS) && !targetEnvironment(macCatalyst)
@@ -244,6 +247,7 @@ public struct AIChatView: View {
         composerLayout
             .onChange(of: selectedMediaItems) { _, items in
                 guard !items.isEmpty else { return }
+                selectedMediaItems = []
                 Task { await importAttachments(from: items) }
             }
 #else
@@ -258,166 +262,151 @@ public struct AIChatView: View {
                 AnyView(reminderArea)
             }
             
-            VStack(spacing: 0) {
-                
-                Divider()
-                    .overlay(Color.primary.opacity(0.08))
-                
-                composerSurface
-                    .frame(maxWidth: AIChatLayout.composerMaxWidth)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, AIChatLayout.composerOuterHorizontalPadding)
-                    .padding(.vertical, AIChatLayout.composerOuterVerticalPadding)
-            }
-            .background {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .ignoresSafeArea()
-            }
+            composerSurface
+                .frame(maxWidth: AIChatLayout.composerMaxWidth)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, AIChatLayout.composerOuterHorizontalPadding)
+                .padding(.vertical, AIChatLayout.composerOuterVerticalPadding)
         }
     }
 
-    @ViewBuilder
     private var composerSurface: some View {
-#if os(visionOS)
-        materialComposerSurface
-#else
-        if #available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *) {
-            composerContent
-                .glassEffect(
-                    .regular.interactive(),
-                    in: .rect(cornerRadius: AIChatLayout.composerCornerRadius)
-                )
-        } else {
-            materialComposerSurface
-        }
-#endif
-    }
-
-    private var materialComposerSurface: some View {
-        composerContent
-            .background(
-                .ultraThinMaterial,
-                in: RoundedRectangle(cornerRadius: AIChatLayout.composerCornerRadius, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: AIChatLayout.composerCornerRadius, style: .continuous)
-                    .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-            }
-    }
-
-    private var composerContent: some View {
-        VStack(alignment: .leading, spacing: AIChatLayout.composerVerticalSpacing) {
+        VStack(alignment: .leading, spacing: 10) {
             if !attachments.isEmpty {
                 AttachmentDraftStrip(attachments: $attachments)
             }
 
-            HStack(spacing: AIChatLayout.composerControlSpacing) {
-#if os(iOS) || os(macOS) || os(visionOS)
-                Button {
-                    if speechInput.isRecording {
-                        endSpeechInput()
-                    } else {
-                        startSpeechInput()
-                    }
-                } label: {
-                    ZStack {
-                        Image(systemName: speechInput.isRecording ? "waveform" : "mic")
-                            .font(.system(size: AIChatLayout.microphoneIconSize, weight: .medium))
-                            .foregroundStyle(speechInput.isRecording ? Color.accentColor : Color.primary)
-                            .opacity(speechInput.isProcessing ? 0 : 1)
-
-                        if speechInput.isProcessing {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
-                    .frame(
-                        width: AIChatLayout.accessoryControlSize,
-                        height: AIChatLayout.composerControlHeight
+            ChatComposerGlassContainer {
+                HStack(alignment: .bottom, spacing: 10) {
+                    composerInput
+                    ChatSendButton(
+                        isEnabled: canSubmit && !isSending && sendFlight == nil && !speechInput.isBusy,
+                        action: submit
                     )
                 }
-                .buttonStyle(.plain)
-                .disabled(speechInput.isProcessing || isSending || sendFlight != nil)
-                .accessibilityLabel(
-                    speechInput.isRecording
-                        ? String(localized: "Stop recording", bundle: .module)
-                        : String(localized: "Start voice input", bundle: .module)
-                )
-                .accessibilityIdentifier("aiChat.microphone")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var composerInput: some View {
+#if os(iOS)
+        CompactChatImagePicker(
+            isPresented: $isPhotoPickerPresented,
+            onSelection: { selectedMediaItems = $0 },
+            onCamera: cameraAction
+        ) {
+            composerInputContent
+        }
+#else
+        ChatComposerCapsule { composerInputContent }
+#endif
+    }
+
+#if os(iOS)
+    private var cameraAction: (() -> Void)? {
+#if !targetEnvironment(macCatalyst)
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else { return nil }
+        return {
+            isInputFocused = false
+            isCameraPresented = true
+        }
+#else
+        nil
+#endif
+    }
 #endif
 
-                TextField(placeholder, text: $draft, axis: .vertical)
-                    .font(.body)
-                    .lineLimit(1...AIChatLayout.maximumInputLines)
-                    .textFieldStyle(.plain)
-                    .disabled(speechInput.isBusy)
-                    .focused($isInputFocused)
-                    .submitLabel(.send)
-                    .onSubmit(submit)
-                    .onGeometryChange(for: CGRect.self) { geometry in
-                        geometry.frame(in: .named(MessageSendFlight.coordinateSpace))
-                    } action: { composerTextFrame = $0 }
+    private var composerInputContent: some View {
+        HStack(spacing: AIChatLayout.composerControlSpacing) {
+            attachmentMenu
 
-                attachmentMenu
+            TextField(placeholder, text: $draft, axis: .vertical)
+                .font(.body)
+                .lineLimit(1...AIChatLayout.maximumInputLines)
+                .textFieldStyle(.plain)
+                .disabled(speechInput.isBusy)
+                .focused($isInputFocused)
+                .submitLabel(.send)
+                .onSubmit(submit)
+                .onGeometryChange(for: CGRect.self) { geometry in
+                    geometry.frame(in: .named(MessageSendFlight.coordinateSpace))
+                } action: { composerTextFrame = $0 }
+                .accessibilityIdentifier("aiChat.input")
 
-                Button(action: submit) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: AIChatLayout.sendIconSize, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: AIChatLayout.sendButtonSize, height: AIChatLayout.sendButtonSize)
-                        .background(sendButtonColor, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSubmit || isSending || sendFlight != nil || speechInput.isBusy)
-                .accessibilityLabel(String(localized: "Send", bundle: .module))
-            }
-            .foregroundStyle(.primary)
+            microphoneButton
         }
+        .foregroundStyle(.primary)
         .padding(.horizontal, AIChatLayout.composerInnerHorizontalPadding)
-        .padding(.vertical, AIChatLayout.composerInnerVerticalPadding)
+        .padding(.vertical, 5)
+        .frame(minHeight: AIChatLayout.composerMinimumHeight)
+    }
+
+    @ViewBuilder
+    private var microphoneButton: some View {
+#if os(iOS) || os(macOS) || os(visionOS)
+        Button {
+            if speechInput.isRecording {
+                endSpeechInput()
+            } else {
+                startSpeechInput()
+            }
+        } label: {
+            ZStack {
+                Image(systemName: speechInput.isRecording ? "waveform" : "mic")
+                    .font(.system(size: AIChatLayout.microphoneIconSize, weight: .medium))
+                    .foregroundStyle(speechInput.isRecording ? Color.accentColor : Color.primary)
+                    .opacity(speechInput.isProcessing ? 0 : 1)
+
+                if speechInput.isProcessing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .frame(
+                width: AIChatLayout.accessoryControlSize,
+                height: AIChatLayout.composerControlHeight
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(speechInput.isProcessing || isSending || sendFlight != nil)
+        .accessibilityLabel(
+            speechInput.isRecording
+                ? String(localized: "Stop recording", bundle: .module)
+                : String(localized: "Start voice input", bundle: .module)
+        )
+        .accessibilityIdentifier("aiChat.microphone")
+#endif
     }
 
     @ViewBuilder
     private var attachmentMenu: some View {
-#if os(iOS) || os(macOS) || os(visionOS)
-        Menu {
-#if os(iOS) && !targetEnvironment(macCatalyst)
-                    Button {
-                        isInputFocused = false
-                        isCameraPresented = true
-                    } label: {
-                        Label(String(localized: "Camera", bundle: .module), systemImage: "camera")
-                    }
-                    .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
-#endif
-
-                    PhotosPicker(
-                        selection: $selectedMediaItems,
-                        maxSelectionCount: 8,
-                        matching: .any(of: [.images, .videos])
-                    ) {
-                        Label(String(localized: "Photos & Videos", bundle: .module), systemImage: "photo.on.rectangle")
-                    }
+#if os(iOS)
+        Button {
+            isInputFocused = false
+            isPhotoPickerPresented.toggle()
         } label: {
-            Image(systemName: "plus.circle")
-                .font(.system(size: AIChatLayout.attachmentIconSize))
-                .frame(
-                    width: AIChatLayout.accessoryControlSize,
-                    height: AIChatLayout.composerControlHeight
-                )
+            ChatAttachmentButtonLabel()
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(String(localized: "Add attachment", bundle: .module))
+        .accessibilityIdentifier("aiChat.attachments")
+#elseif os(macOS) || os(visionOS)
+        PhotosPicker(
+            selection: $selectedMediaItems,
+            maxSelectionCount: 8,
+            matching: .any(of: [.images, .videos])
+        ) {
+            ChatAttachmentButtonLabel()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: "Add attachment", bundle: .module))
+        .accessibilityIdentifier("aiChat.attachments")
 #endif
     }
 
     private var canSubmit: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
-    }
-
-    private var sendButtonColor: Color {
-        canSubmit && !isSending && sendFlight == nil && !speechInput.isBusy
-            ? .accentColor : .secondary.opacity(0.35)
     }
 
     private var errorPresented: Binding<Bool> {
@@ -572,7 +561,6 @@ public struct AIChatView: View {
                 )
             )
         }
-        selectedMediaItems = []
     }
 #endif
 
@@ -818,31 +806,33 @@ private struct AttachmentDraftStrip: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
                 ForEach(attachments) { attachment in
-                    AttachmentPreview(attachment: attachment)
+                    AttachmentPreview(attachment: attachment, width: 80, height: 80, cornerRadius: 15)
                         .overlay(alignment: .topTrailing) {
                             Button {
                                 attachments.removeAll { $0.id == attachment.id }
                             } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .symbolRenderingMode(.palette)
-                                    .foregroundStyle(
-                                        Color.primary,
-                                        Color.secondary.opacity(0.65)
-                                    )
+                                Image(systemName: "xmark")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .frame(width: 28, height: 28)
+                                    .background(.regularMaterial, in: Circle())
                             }
                             .buttonStyle(.plain)
-                            .offset(x: 5, y: -5)
+                            .padding(3)
                             .accessibilityLabel(String(localized: "Remove attachment", bundle: .module))
                         }
                 }
             }
-            .padding(.top, 5)
         }
+        .frame(height: 80)
     }
 }
 
 private struct AttachmentPreview: View {
     let attachment: AIChatInput.Attachment
+    var width: CGFloat = AIChatLayout.attachmentWidth
+    var height: CGFloat = AIChatLayout.attachmentHeight
+    var cornerRadius: CGFloat = 13
 
     var body: some View {
         ZStack {
@@ -862,10 +852,10 @@ private struct AttachmentPreview: View {
             mediaPlaceholder
 #endif
         }
-        .frame(width: AIChatLayout.attachmentWidth, height: AIChatLayout.attachmentHeight)
-        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(Color.primary.opacity(0.12))
         }
     }
@@ -883,6 +873,7 @@ private struct AttachmentPreview: View {
 }
 
 enum AIChatLayout {
+    static let composerMinimumHeight: CGFloat = 44
 #if os(macOS)
     static let titleFont: Font = .subheadline
     static let headerHorizontalPadding: CGFloat = 12
@@ -895,15 +886,10 @@ enum AIChatLayout {
     static let composerOuterHorizontalPadding: CGFloat = 12
     static let composerOuterVerticalPadding: CGFloat = 9
     static let composerInnerHorizontalPadding: CGFloat = 12
-    static let composerInnerVerticalPadding: CGFloat = 8
-    static let composerVerticalSpacing: CGFloat = 7
     static let composerControlSpacing: CGFloat = 8
     static let composerControlHeight: CGFloat = 28
-    static let composerCornerRadius: CGFloat = 18
     static let accessoryControlSize: CGFloat = 26
     static let microphoneIconSize: CGFloat = 17
-    static let attachmentIconSize: CGFloat = 20
-    static let sendButtonSize: CGFloat = 26
     static let sendIconSize: CGFloat = 12
     static let maximumInputLines = 4
     static let avatarSize: CGFloat = 30
@@ -926,15 +912,10 @@ enum AIChatLayout {
     static let composerOuterHorizontalPadding: CGFloat = 48
     static let composerOuterVerticalPadding: CGFloat = 24
     static let composerInnerHorizontalPadding: CGFloat = 24
-    static let composerInnerVerticalPadding: CGFloat = 18
-    static let composerVerticalSpacing: CGFloat = 14
     static let composerControlSpacing: CGFloat = 18
     static let composerControlHeight: CGFloat = 52
-    static let composerCornerRadius: CGFloat = 30
     static let accessoryControlSize: CGFloat = 48
     static let microphoneIconSize: CGFloat = 24
-    static let attachmentIconSize: CGFloat = 30
-    static let sendButtonSize: CGFloat = 52
     static let sendIconSize: CGFloat = 22
     static let maximumInputLines = 3
     static let avatarSize: CGFloat = 48
@@ -957,15 +938,10 @@ enum AIChatLayout {
     static let composerOuterHorizontalPadding: CGFloat = 3
     static let composerOuterVerticalPadding: CGFloat = 4
     static let composerInnerHorizontalPadding: CGFloat = 7
-    static let composerInnerVerticalPadding: CGFloat = 6
-    static let composerVerticalSpacing: CGFloat = 5
     static let composerControlSpacing: CGFloat = 5
     static let composerControlHeight: CGFloat = 30
-    static let composerCornerRadius: CGFloat = 16
     static let accessoryControlSize: CGFloat = 28
     static let microphoneIconSize: CGFloat = 16
-    static let attachmentIconSize: CGFloat = 18
-    static let sendButtonSize: CGFloat = 28
     static let sendIconSize: CGFloat = 12
     static let maximumInputLines = 2
     static let avatarSize: CGFloat = 24
@@ -988,15 +964,10 @@ enum AIChatLayout {
     static let composerOuterHorizontalPadding: CGFloat = 24
     static let composerOuterVerticalPadding: CGFloat = 18
     static let composerInnerHorizontalPadding: CGFloat = 18
-    static let composerInnerVerticalPadding: CGFloat = 14
-    static let composerVerticalSpacing: CGFloat = 10
     static let composerControlSpacing: CGFloat = 12
     static let composerControlHeight: CGFloat = 40
-    static let composerCornerRadius: CGFloat = 24
     static let accessoryControlSize: CGFloat = 36
     static let microphoneIconSize: CGFloat = 21
-    static let attachmentIconSize: CGFloat = 25
-    static let sendButtonSize: CGFloat = 38
     static let sendIconSize: CGFloat = 17
     static let maximumInputLines = 5
     static let avatarSize: CGFloat = 38
@@ -1016,18 +987,13 @@ enum AIChatLayout {
     static let contentVerticalPadding: CGFloat = 24
     static let messageSpacing: CGFloat = 20
     static let composerMaxWidth: CGFloat = .infinity
-    static let composerOuterHorizontalPadding: CGFloat = 20
-    static let composerOuterVerticalPadding: CGFloat = 20
-    static let composerInnerHorizontalPadding: CGFloat = 18
-    static let composerInnerVerticalPadding: CGFloat = 13
-    static let composerVerticalSpacing: CGFloat = 10
+    static let composerOuterHorizontalPadding: CGFloat = 15
+    static let composerOuterVerticalPadding: CGFloat = 10
+    static let composerInnerHorizontalPadding: CGFloat = 15
     static let composerControlSpacing: CGFloat = 12
     static let composerControlHeight: CGFloat = 34
-    static let composerCornerRadius: CGFloat = 28
     static let accessoryControlSize: CGFloat = 30
     static let microphoneIconSize: CGFloat = 22
-    static let attachmentIconSize: CGFloat = 26
-    static let sendButtonSize: CGFloat = 32
     static let sendIconSize: CGFloat = 16
     static let maximumInputLines = 5
     static let avatarSize: CGFloat = 36

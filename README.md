@@ -240,6 +240,8 @@ Caller-provided values such as role names, conversation titles, response content
 
 AIChatUI uses semantic SwiftUI colors and Material surfaces, supports light and dark appearance automatically, and adopts Liquid Glass on supported version 26+ platforms. Layout measurements are tuned independently for compact watch interfaces, touch interfaces, macOS windows, television focus navigation, and spatial windows.
 
+The composer uses a capsule input with a leading attachment button, a voice input control, and a separate paperplane send button. On iOS, the capsule transforms into a compact inline photo/video picker using a matched zoom transition and the system popover's Liquid Glass on iOS 26+. Expanding the picker zooms into the full library, where you can select up to eight items. Camera capture remains available in the compact picker. Selected attachments appear as removable thumbnails above the input.
+
 ## License
 
 AIChatUI is available under the MIT License. See `LICENSE` for details.
