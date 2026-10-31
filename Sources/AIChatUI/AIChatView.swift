@@ -38,12 +38,14 @@ public struct AIChatView: View {
     private let roles: [AIChatRole]
     private let title: String
     private let placeholder: String
+    private let externalDraft: Binding<String>?
+    private let inputFocusRequest: UUID?
     private let onSend: SendHandler
     private let onDismiss: (() -> Void)?
     private let onMicrophoneTap: (() -> Void)?
     @ViewBuilder private let reminderArea: (any View)?
 
-    @State private var draft = ""
+    @State private var localDraft = ""
     @State private var attachments: [AIChatInput.Attachment] = []
 #if os(iOS) || os(macOS) || os(visionOS)
     @State private var selectedMediaItems: [PhotosPickerItem] = []
@@ -53,6 +55,8 @@ public struct AIChatView: View {
 #endif
     @State private var speechInput = SpeechInputController()
     @State private var speechInputPrefix = ""
+    @State private var speechInputFocusRequest: UUID?
+    @State private var isSpeechInputSuperseded = false
 #if os(iOS) && !targetEnvironment(macCatalyst)
     @State private var isCameraPresented = false
 #endif
@@ -72,11 +76,18 @@ public struct AIChatView: View {
 
     /// Creates a chat supporting either one or many AI roles.
     /// Call `onUpdate` repeatedly with the same response ID to replace it in place.
+    ///
+    /// Pass `draft` to read or edit the composer's text from the parent. Sending
+    /// clears this binding; omitting it keeps the draft local to the chat.
+    /// Change `inputFocusRequest` to a new non-nil UUID to stop active dictation
+    /// and focus the composer without sending. Setting it to nil leaves focus unchanged.
     public init(
         conversation: Binding<AIConversation>,
         roles: [AIChatRole],
         title: String? = nil,
         placeholder: String? = nil,
+        draft: Binding<String>? = nil,
+        inputFocusRequest: UUID? = nil,
         reminderArea: (() -> any View)? = nil,
         onDismiss: (() -> Void)? = nil,
         onMicrophoneTap: (() -> Void)? = nil,
@@ -86,6 +97,8 @@ public struct AIChatView: View {
         self.roles = roles
         self.title = title ?? String(localized: "Conversation", bundle: .module)
         self.placeholder = placeholder ?? String(localized: "Type a message...", bundle: .module)
+        self.externalDraft = draft
+        self.inputFocusRequest = inputFocusRequest
         self.reminderArea = reminderArea?()
         self.onDismiss = onDismiss
         self.onMicrophoneTap = onMicrophoneTap
@@ -93,11 +106,14 @@ public struct AIChatView: View {
     }
 
     /// Convenience initializer for a single-role, single-response conversation.
+    /// `draft` and `inputFocusRequest` have the same behavior as the multi-role initializer.
     public init(
         conversation: Binding<AIConversation>,
         role: AIChatRole,
         title: String? = nil,
         placeholder: String? = nil,
+        draft: Binding<String>? = nil,
+        inputFocusRequest: UUID? = nil,
         reminderArea: (() -> any View)? = nil,
         onDismiss: (() -> Void)? = nil,
         onMicrophoneTap: (() -> Void)? = nil,
@@ -108,6 +124,8 @@ public struct AIChatView: View {
             roles: [role],
             title: title,
             placeholder: placeholder,
+            draft: draft,
+            inputFocusRequest: inputFocusRequest,
             reminderArea: reminderArea,
             onDismiss: onDismiss,
             onMicrophoneTap: onMicrophoneTap
@@ -149,6 +167,12 @@ public struct AIChatView: View {
             speechInput.cancel()
         }
         .onChange(of: conversation.id) { _, _ in cancelSend() }
+        .onChange(of: inputFocusRequest) { _, request in
+            guard request != nil else { return }
+            isSpeechInputSuperseded = true
+            if speechInput.isBusy { speechInput.cancel() }
+            isInputFocused = true
+        }
         .onChange(of: reduceMotion) { _, enabled in
             if enabled, let id = sendFlight?.id { finishSendFlight(id: id) }
         }
@@ -231,6 +255,12 @@ public struct AIChatView: View {
     private var composer: some View {
         composerWithMediaImport
             .onChange(of: speechInput.transcript) { _, transcript in
+                // A host edit can arrive in the same render as a transcript.
+                // Compare before writing, even if focus cancellation has not run.
+                guard !isSpeechInputSuperseded,
+                      inputFocusRequest == nil || inputFocusRequest == speechInputFocusRequest else {
+                    return
+                }
                 draft = joinedSpeechText(prefix: speechInputPrefix, transcript: transcript)
             }
             .onChange(of: speechInput.errorMessage) { _, message in
@@ -321,7 +351,7 @@ public struct AIChatView: View {
         HStack(spacing: AIChatLayout.composerControlSpacing) {
             attachmentMenu
 
-            TextField(placeholder, text: $draft, axis: .vertical)
+            TextField(placeholder, text: draftBinding, axis: .vertical)
                 .font(.body)
                 .lineLimit(1...AIChatLayout.maximumInputLines)
                 .textFieldStyle(.plain)
@@ -403,6 +433,15 @@ public struct AIChatView: View {
         .accessibilityLabel(String(localized: "Add attachment", bundle: .module))
         .accessibilityIdentifier("aiChat.attachments")
 #endif
+    }
+
+    private var draftBinding: Binding<String> {
+        externalDraft ?? $localDraft
+    }
+
+    private var draft: String {
+        get { draftBinding.wrappedValue }
+        nonmutating set { draftBinding.wrappedValue = newValue }
     }
 
     private var canSubmit: Bool {
@@ -493,6 +532,8 @@ public struct AIChatView: View {
 
     private func startSpeechInput() {
         guard !isSending, sendFlight == nil, !speechInput.isBusy else { return }
+        speechInputFocusRequest = inputFocusRequest
+        isSpeechInputSuperseded = false
         speechInputPrefix = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         isInputFocused = false
         onMicrophoneTap?()
